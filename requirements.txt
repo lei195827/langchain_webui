@@ -1,0 +1,12 @@
+langchain
+gradio
+openai
+requests
+fitz
+nltk
+paddleocr
+feedparser
+torch
+pypinyin
+pydantic
+numpy
