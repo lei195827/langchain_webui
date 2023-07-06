@@ -3,6 +3,7 @@ gradio
 openai
 requests
 fitz
+PyMuPDF
 nltk
 paddleocr
 feedparser
@@ -10,3 +11,6 @@ torch
 pypinyin
 pydantic
 numpy
+paddlepaddle
+unstructured
+faiss-cpu
