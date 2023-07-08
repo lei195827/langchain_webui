@@ -1,12 +1,98 @@
 import os.path
+import shutil
 import time
 import gradio as gr
-from utils import *
+from configs.model_config import *
 from langchain.chat_models import ChatOpenAI
+from utils.utils import ChatMessageHistory, load_file, VectorStore
+from langchain.schema import (
+    AIMessage,
+    BaseChatMessageHistory,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage
+)
 
 # 初始化记忆池
 chat_history = ChatMessageHistory()
 chatkn_history = ChatMessageHistory()
+# 初始化向量数据库
+vector_store = VectorStore()
+vector_store.create_vector_store(documents=None)
+vs_file_dict = vector_store.get_docs_dict()
+
+
+def delete_one_file(vs_file_choice_dropdown):
+    global vs_file_dict
+    info = ""
+    vs_file_dict = vector_store.get_docs_dict()
+    if isinstance(vs_file_dict, dict) and len(vs_file_dict) > 0:
+        try:
+            info = vector_store.delete_one_vector_store(source=vs_file_choice_dropdown)
+        except Exception as e:
+            info += f"dict is not exist,{e}"
+            logger.exception(f"dict is not exist,{e}")
+    else:
+        info += "数据库为空"
+        return info, gr.Dropdown.update(choices=None)
+    vs_file_dict = vector_store.get_docs_dict()
+    if len(vs_file_dict) == 0:
+        info = vector_store.delete_vector_store()
+    return info, gr.Dropdown.update(choices=list(vs_file_dict.keys()))
+
+
+def delete_all_file():
+    global vs_file_dict
+    info = vector_store.delete_vector_store()
+    vs_file_dict = vector_store.get_docs_dict()
+    return info, gr.Dropdown.update(choices=list(vs_file_dict.keys()))
+
+
+def move_file(source_path, destination_path):
+    try:
+        shutil.move(source_path, destination_path)
+        print(f"移动文件{str(source_path)}到{str(destination_path)}")
+        return f"已增加文件{os.path.basename(destination_path)}至数据库"
+    except Exception as e:
+        print(f"移动文件{str(source_path)}失败: {str(e)}")
+        return f"增加文件{os.path.basename(destination_path)}至数据库失败: {str(e)}"
+
+
+def build_vs_by_file(files, sentence_size):
+    """
+        建立数据库的回调函数，先读取文件，再
+    """
+    vector_store = VectorStore()
+    directory_path = os.path.join(VS_ROOT_PATH, "docs")
+    os.makedirs(directory_path, exist_ok=True)  # 创建保存文件的目录
+    try:
+        if isinstance(files, list):
+            result = []
+            for file in files:
+                filebasename = os.path.basename(file.name)
+                file_path = os.path.join(directory_path, filebasename)
+                result.append(move_file(file.name, file_path))
+                try:
+                    documents = load_file(file_path, sentence_size=sentence_size)
+                    vector_store.create_vector_store(documents=documents, source=filebasename.split('.')[0])
+                except Exception as e:
+                    logger.warning(f"failed to load file {file},{e}")
+                    result = f"failed to load file {file},{e}"
+        else:
+            filebasename = os.path.basename(files.name)
+            file_path = os.path.join(directory_path, filebasename)
+            result = move_file(files.name, file_path)
+            try:
+                documents = load_file(file_path, sentence_size=sentence_size)
+                vector_store.create_vector_store(documents=documents,source=filebasename.split('.')[0])
+            except Exception as e:
+                logger.warning(f"failed to load file {files},{e}")
+                result = f"failed to load file {files},{e}"
+    except Exception as e:
+        logger.warning("failed to build vector_store")
+        result = f"failed to add file {str(files)} vector_store,error:{e}"
+    vs_file_dict = vector_store.get_docs_dict()
+    return result, gr.Dropdown.update(choices=list(vs_file_dict.keys()))
 
 
 def chat(query, chat_chatbot, system_prompt, temperature):
@@ -16,7 +102,7 @@ def chat(query, chat_chatbot, system_prompt, temperature):
                 chat_history.messages[0] = SystemMessage(content=system_prompt)
         else:
             if system_prompt:
-                chat_history.messages[0].insert(0, AIMessage(content=system_prompt))
+                chat_history.messages[0].insert(0, SystemMessage(content=system_prompt))
     else:
         if system_prompt:
             chat_history.add_system_message(system_prompt)
@@ -31,57 +117,18 @@ def chat(query, chat_chatbot, system_prompt, temperature):
     return "", chat_chatbot
 
 
-def move_file(source_path, destination_path):
-    try:
-        shutil.move(source_path, destination_path)
-        print(f"移动文件{str(source_path)}到{str(destination_path)}")
-        return f"已增加文件{str(destination_path)}至数据库"
-    except Exception as e:
-        print(f"移动文件{str(source_path)}失败: {str(e)}")
-        return f"移动文件{str(source_path)}失败: {str(e)}"
-
-
-def save_file(files, sentence_size):
-    """
-        建立数据库的回调函数，先读取文件，再
-    """
-    directory_path = os.path.join(VS_ROOT_PATH, "docs")
-    os.makedirs(directory_path, exist_ok=True)  # 创建保存文件的目录
-    try:
-        if isinstance(files, list):
-            result = []
-            for file in files:
-                filebasename = os.path.basename(file.name)
-                file_path = os.path.join(directory_path, filebasename)
-                result.append(move_file(file.name, file_path))
-                try:
-                    documents = load_file(file_path, sentence_size=sentence_size)
-                    vector_store.create_vector_store(documents=documents)
-                except Exception as e:
-                    logger.warning(f"failed to load file {file},{e}")
-                    result = f"failed to load file {file},{e}"
-        else:
-            filebasename = os.path.basename(files.name)
-            file_path = os.path.join(directory_path, filebasename)
-            result = move_file(files.name, file_path)
-            try:
-                documents = load_file(file_path, sentence_size=sentence_size)
-                vector_store.create_vector_store(documents=documents)
-            except Exception as e:
-                logger.warning(f"failed to load file {files},{e}")
-                result = f"failed to load file {files},{e}"
-    except Exception as e:
-        logger.warning("failed to build vector_store")
-        result = f"failed to add file {str(files)} vector_store"
-    return result
-
-
 def kn_chat(know_ask_input, chat_chatbot, kv_num=4, min_score=0.3):
+    vector_store = VectorStore()
     db = vector_store.db
     if db is None:
         chat_chatbot.append((know_ask_input, "请先加载或者上传知识库"))
         return "", chat_chatbot
+    # try:
     docs_and_scores = db.similarity_search_with_score(query=know_ask_input, k=kv_num)
+    # except Exception as e:
+    #     info = f"数据库搜索出错，请检查是否有上传文件或所有文件已被删除,错误码:{e}"
+    #     chat_chatbot.append((know_ask_input, info))
+    #     return "", chat_chatbot
     kn_vector = ""
     kn = []
     # 假设docs_and_scores是db.similarity_search_with_score(query)返回的文档和分数列表
@@ -113,10 +160,6 @@ def kn_chat(know_ask_input, chat_chatbot, kv_num=4, min_score=0.3):
     return "", chat_chatbot
 
 
-# 初始化向量数据库
-vector_store = VectorStore()
-vector_store.create_vector_store(documents=None)
-
 with gr.Blocks() as demo:
     gr.Markdown("知识库测试")
     with gr.Tab("普通聊天模式"):
@@ -142,10 +185,14 @@ with gr.Blocks() as demo:
                 min_score = gr.Slider(step=0.01, minimum=0, maximum=1, label="分数阈值", value=0.25)
                 sentence_size = gr.Slider(step=1, minimum=50, maximum=1000, label="分割长度", value=200)
                 docs_input = gr.File()
-
-                docx_text = gr.Textbox(label="通知栏")
-                vector_store_creat_button = gr.Button("新建或知识库")
-                vector_store_delete_button = gr.Button("删除数据库")
+                info_docx_text = gr.Textbox(label="通知栏")
+                with gr.Row():
+                    vs_creat_button = gr.Button("新建或增加知识库")
+                    vs_delete_button = gr.Button("删除数据库")
+                with gr.Row():
+                    vs_file_choice_dropdown = gr.Dropdown(choices=vs_file_dict,
+                                                          label="删除指定文件")
+                    vs_file_delete_button = gr.Button("删除指定文件")
 
     with gr.Accordion("Open for More!"):
         gr.Markdown("Look at  me...")
@@ -153,6 +200,11 @@ with gr.Blocks() as demo:
     ask_input.submit(chat, inputs=[ask_input, chatbot, text_sysprompt_input, temperature], outputs=[ask_input, chatbot])
     know_ask_input.submit(kn_chat, inputs=[know_ask_input, chatbot_kn, kv_num, min_score],
                           outputs=[know_ask_input, chatbot_kn])
-    vector_store_creat_button.click(save_file, inputs=[docs_input, sentence_size], outputs=docx_text)
-    vector_store_delete_button.click(vector_store.delete_vector_store, outputs=docx_text)
-demo.launch(server_name='0.0.0.0', server_port=8888)
+    vs_creat_button.click(build_vs_by_file, inputs=[docs_input, sentence_size],
+                          outputs=[info_docx_text, vs_file_choice_dropdown])
+    # 删除整个知识库
+    vs_delete_button.click(delete_all_file, outputs=[info_docx_text, vs_file_choice_dropdown])
+    vs_file_delete_button.click(delete_one_file, inputs=[vs_file_choice_dropdown],
+                                outputs=[info_docx_text, vs_file_choice_dropdown])
+
+demo.launch(server_name=HOST, server_port=PORT, share=SHARE)
