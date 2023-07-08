@@ -165,4 +165,4 @@ with gr.Blocks() as demo:
                           outputs=[know_ask_input, chatbot_kn])
     vector_store_creat_button.click(save_file, inputs=[docs_input, sentence_size], outputs=docx_text)
     vector_store_delete_button.click(vector_store.delete_vector_store, outputs=docx_text)
-demo.launch(server_name='0.0.0.0', server_port=8888)
+demo.launch(server_name='0.0.0.0', server_port=8888,share=True)
